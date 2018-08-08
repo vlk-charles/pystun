@@ -7,13 +7,14 @@ attrTypeEnum = {1: "MAPPED-ADDRESS", 2: "RESPONSE-ADDRESS", 3: "CHANGE-REQUEST",
 argparser = argparse.ArgumentParser(description="Query a STUN server.", epilog="This software loosely follows the RFC 3489 and 5389 standards.")
 argparser.add_argument("-t", "--tcp", action="store_true", help="use TCP instead of UDP")
 argparser.add_argument("-r", "--raw", action="store_true", help="do not parse reply attributes")
+argparser.add_argument("-m", "--magiccookie", action="store_true", help="signal RFC 5389 support by sending the magic cookie in the transaction ID")
 argparser.add_argument("-p", "--port", "--sourceport", type=int, default=0, help="local port to send request from (default: random)")
 argparser.add_argument("-a", "--address", "--sourceaddress", default="0.0.0.0", help="local address to send request from (default: %(default)s)")
 argparser.add_argument("server", default="stun.stunprotocol.org", nargs="?", help="the STUN server to be queried (default: %(default)s)")
 argparser.add_argument("serverport", type=int, default=3478, nargs="?", help="the server's port to send the request to (default: %(default)s)")
 
 opts = argparser.parse_args()
-transid = struct.pack("IIII", random.randrange(2**32), random.randrange(2**32), random.randrange(2**32), random.randrange(2**32))
+transid = struct.pack(">IIII", 0x2112A442 if opts.magiccookie else random.randrange(2**32), random.randrange(2**32), random.randrange(2**32), random.randrange(2**32))
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM if opts.tcp else socket.SOCK_DGRAM)
 sock.bind((opts.address, opts.port))

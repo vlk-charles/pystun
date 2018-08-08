@@ -2,7 +2,18 @@
 
 import argparse, socket, random, struct
 
-attrTypeEnum = {1: "MAPPED-ADDRESS", 2: "RESPONSE-ADDRESS", 3: "CHANGE-REQUEST", 4: "SOURCE-ADDRESS", 5: "CHANGED-ADDRESS", 32: "XOR-MAPPED-ADDRESS", 34: "SOFTWARE", 35: "ALTERNATE-SERVER"}
+attrTypeEnum = {
+ 1: "MAPPED-ADDRESS",
+ 2: "RESPONSE-ADDRESS",
+ 3: "CHANGE-REQUEST",
+ 4: "SOURCE-ADDRESS",
+ 5: "CHANGED-ADDRESS",
+32: "XOR-MAPPED-ADDRESS",
+34: "SOFTWARE",
+35: "ALTERNATE-SERVER",
+38: "PADDING",
+43: "RESPONSE-ORIGIN",
+44: "OTHER-ADDRESS"}
 
 argparser = argparse.ArgumentParser(description="Query a STUN server.", epilog="This software loosely follows the RFC 3489 and 5389 standards.")
 argparser.add_argument("-t", "--tcp", action="store_true", help="use TCP instead of UDP")
@@ -43,7 +54,7 @@ while i <len(reply):
  attrOpt = bool(attrType >> 15)
  attrType %= 0x8000
  print(" attribute type {} {}{}, value length: {}".format(attrType, attrTypeEnum.get(attrType, "unknown"), " (comprehension-optional)" if attrOpt else "", attrValLen))
- if not opts.raw and attrType in [1,2,4,5,32,35]: # parse address
+ if not opts.raw and attrType in [1, 2, 4, 5, 32, 35, 43, 44]: # parse address
   addrFam = struct.unpack("B", reply[i+1:i+2])[0]
   i += 2
   if addrFam == 1 and attrValLen == 8:

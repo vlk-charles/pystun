@@ -2,18 +2,20 @@
 
 import argparse, socket, random, struct
 
-attrTypeEnum = {
- 1: "MAPPED-ADDRESS",
- 2: "RESPONSE-ADDRESS",
- 3: "CHANGE-REQUEST",
- 4: "SOURCE-ADDRESS",
- 5: "CHANGED-ADDRESS",
-32: "XOR-MAPPED-ADDRESS",
-34: "SOFTWARE",
-35: "ALTERNATE-SERVER",
-38: "PADDING",
-43: "RESPONSE-ORIGIN",
-44: "OTHER-ADDRESS"}
+# (attributeName, isAddress)
+attrTypes = {
+0x0001: ("MAPPED-ADDRESS", True),
+0x0002: ("RESPONSE-ADDRESS", True),
+0x0003: ("CHANGE-REQUEST", False),
+0x0004: ("SOURCE-ADDRESS", True),
+0x0005: ("CHANGED-ADDRESS", True),
+0x0020: ("XOR-MAPPED-ADDRESS", True),
+0x8020: ("XOR-MAPPED-ADDRESS", True),
+0x8022: ("SOFTWARE", False),
+0x8023: ("ALTERNATE-SERVER", True),
+0x8026: ("PADDING", False),
+0x802b: ("RESPONSE-ORIGIN", True),
+0x802c: ("OTHER-ADDRESS", True)}
 
 argparser = argparse.ArgumentParser(description="Query a STUN server.", epilog="This software loosely follows the RFC 3489 and 5389 standards.")
 argparser.add_argument("-t", "--tcp", action="store_true", help="use TCP instead of UDP")
@@ -51,10 +53,9 @@ i=20
 while i <len(reply):
  attrType, attrValLen = struct.unpack(">HH", reply[i:i+4])
  i += 4
- attrOpt = bool(attrType >> 15)
- attrType %= 0x8000
- print(" attribute type {} {}{}, value length: {}".format(attrType, attrTypeEnum.get(attrType, "unknown"), " (comprehension-optional)" if attrOpt else "", attrValLen))
- if not opts.raw and attrType in [1, 2, 4, 5, 32, 35, 43, 44]: # parse address
+ attrTypeDec = attrTypes.get(attrType, ("unknown", False))
+ print(" attribute type {:x} {}, value length: {}".format(attrType, attrTypeDec[0], attrValLen))
+ if not opts.raw and attrTypeDec[1]: # parse address
   addrFam = struct.unpack("B", reply[i+1:i+2])[0]
   i += 2
   if addrFam == 1 and attrValLen == 8:
@@ -62,7 +63,7 @@ while i <len(reply):
    i += 2
    addr = struct.unpack("BBBB", reply[i:i+4])
    i += 4
-   if attrType == 32:
+   if attrType & 0x7fff == 0x20:
     addr = map(lambda x: x[0] ^ x[1], zip(addr, struct.unpack("BBBB", transid[0:4])))
     addrPort ^= struct.unpack(">H", transid[0:2])[0]
    print("  {}:{}".format(".".join(str(b) for b in addr), addrPort))
@@ -71,7 +72,7 @@ while i <len(reply):
    i += 2
    addr = struct.unpack(">HHHHHHHH", reply[i:i+16])
    i += 16
-   if attrType == 32:
+   if attrType & 0x7fff == 0x20:
     addr = map(lambda x: x[0] ^ x[1], zip(addr, struct.unpack(">HHHHHHHH", transid)))
     addrPort ^= struct.unpack(">H", transid[0:2])[0]
    print("  [{}]:{}".format(":".join("{:04x}".format(n) for n in addr), addrPort))
@@ -80,7 +81,7 @@ while i <len(reply):
    print("  cannot parse address family {}".format(addrFam))
  else:
   attrVal = reply[i:i+attrValLen]
-  if not opts.raw and attrType == 34:
+  if not opts.raw and attrType == 0x8022:
    print("  " + attrVal)
   else:
    print("  " + " ".join("{:02x}".format(ord(c)) for c in attrVal))

@@ -32,10 +32,10 @@ argparser.add_argument("serverport", type=int, default=3478, nargs="?", help="th
 opts = argparser.parse_args()
 transid = struct.pack(">IIII", 0x2112A442 if opts.magiccookie else random.randrange(2**32), random.randrange(2**32), random.randrange(2**32), random.randrange(2**32))
 if opts.changerequest or opts.changeaddress or opts.changeport:
- attrs = "\0\x03\0\x04" + struct.pack(">I", opts.changeaddress << 2 | opts.changeport << 1)
+ attrs = b"\0\x03\0\x04" + struct.pack(">I", opts.changeaddress << 2 | opts.changeport << 1)
 else:
- attrs = ""
-message = "\0\x01" + struct.pack(">H", len(attrs)) + transid + attrs
+ attrs = b""
+message = b"\0\x01" + struct.pack(">H", len(attrs)) + transid + attrs
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM if opts.tcp else socket.SOCK_DGRAM)
 sock.bind((opts.address, opts.port))

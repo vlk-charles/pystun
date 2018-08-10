@@ -21,6 +21,9 @@ argparser = argparse.ArgumentParser(description="Query a STUN server.", epilog="
 argparser.add_argument("-t", "--tcp", action="store_true", help="use TCP instead of UDP")
 argparser.add_argument("-r", "--raw", action="store_true", help="do not parse reply attributes")
 argparser.add_argument("-m", "--magiccookie", action="store_true", help="signal RFC 5389 support by sending the magic cookie in the transaction ID")
+argparser.add_argument("-c", "--changerequest", action="store_true", help="include the CHANGE-REQUEST attribute (empty without -A or -P)")
+argparser.add_argument("-A", "--changeaddress", action="store_true", help="ask the server to reply from a different IP address (implies -c)")
+argparser.add_argument("-P", "--changeport", action="store_true", help="ask the server to reply from a different port (implies -c)")
 argparser.add_argument("-p", "--port", "--sourceport", type=int, default=0, help="local port to send request from (default: random)")
 argparser.add_argument("-a", "--address", "--sourceaddress", default="0.0.0.0", help="local address to send request from (default: %(default)s)")
 argparser.add_argument("server", default="stun.stunprotocol.org", nargs="?", help="the STUN server to be queried (default: %(default)s)")
@@ -28,18 +31,23 @@ argparser.add_argument("serverport", type=int, default=3478, nargs="?", help="th
 
 opts = argparser.parse_args()
 transid = struct.pack(">IIII", 0x2112A442 if opts.magiccookie else random.randrange(2**32), random.randrange(2**32), random.randrange(2**32), random.randrange(2**32))
+if opts.changerequest or opts.changeaddress or opts.changeport:
+ attrs = "\0\x03\0\x04" + struct.pack(">I", opts.changeaddress << 2 | opts.changeport << 1)
+else:
+ attrs = ""
+message = "\0\x01" + struct.pack(">H", len(attrs)) + transid + attrs
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM if opts.tcp else socket.SOCK_DGRAM)
 sock.bind((opts.address, opts.port))
 print("querying {}:{} from {}:{}".format(opts.server, opts.serverport, sock.getsockname()[0], sock.getsockname()[1]))
 if opts.tcp:
  sock.connect((opts.server, opts.serverport))
- sock.send("\0\x01\0\0" + transid)
+ sock.send(message)
  reply = sock.recv(512)
  sock.close()
  print("reply")
 else:
- sock.sendto("\0\x01\0\0" + transid, (opts.server, opts.serverport))
+ sock.sendto(message, (opts.server, opts.serverport))
  reply = sock.recvfrom(512)
  print("reply from {}:{}".format(reply[1][0], reply[1][1]))
  reply = reply[0]

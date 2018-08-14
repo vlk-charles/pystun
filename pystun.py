@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 
 import argparse, socket, random, struct
 
@@ -28,7 +28,8 @@ def parseError(attrVal):
  return "{}{}{:02} {}".format(code[0], "." if code[0] > 9 or code[1] > 99 else "", code[1], parseStr(attrVal[4:]))
 
 def returnRaw(attrVal):
- return " ".join("{:02x}".format(ord(c)) for c in attrVal)
+ lOrd = (lambda c: c) if type(b"\0"[0]) == int else ord # no-op for Python 3
+ return " ".join("{:02x}".format(lOrd(c)) for c in attrVal)
 
 # (attributeName, parseFunc)
 attrTypes = {

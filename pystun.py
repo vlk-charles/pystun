@@ -3,21 +3,18 @@
 import argparse, socket, random, struct
 
 def parseAddress(attrVal, xor=False):
+ addrFams = { # (structStr, formatFunc)
+  1: ("BBBB", lambda addr: "{}".format(".".join(str(b) for b in addr))),
+  2: (">HHHHHHHH", lambda addr: "[{}]".format(":".join("{:04x}".format(n) for n in addr)))}
  addrFam = struct.unpack("B", attrVal[1:2])[0]
- if addrFam == 1 and len(attrVal) == 8:
+ addrLen = struct.calcsize(addrFams.get(addrFam,("", None))[0])
+ if addrFam in addrFams and len(attrVal) == 4 + addrLen:
   addrPort = struct.unpack(">H", attrVal[2:4])[0]
-  addr = struct.unpack("BBBB", attrVal[4:8])
+  addr = struct.unpack(addrFams[addrFam][0], attrVal[4:4+addrLen])
   if xor:
-   addr = map(lambda x: x[0] ^ x[1], zip(addr, struct.unpack("BBBB", transid[0:4])))
-   addrPort ^= struct.unpack(">H", transid[0:2])[0]
-  return "{}:{}".format(".".join(str(b) for b in addr), addrPort)
- elif addrFam == 2 and len(attrVal) == 20:
-  addrPort = struct.unpack(">H", attrVal[2:4])[0]
-  addr = struct.unpack(">HHHHHHHH", attrVal[4:20])
-  if xor:
-   addr = map(lambda x: x[0] ^ x[1], zip(addr, struct.unpack(">HHHHHHHH", transid)))
-   addrPort ^= struct.unpack(">H", transid[0:2])[0]
-  return "[{}]:{}".format(":".join("{:04x}".format(n) for n in addr), addrPort)
+   addr = map(lambda x: x[0] ^ x[1], zip(addr, struct.unpack(addrFams[addrFam][0], transid[:addrLen])))
+   addrPort ^= struct.unpack(">H", transid[:2])[0]
+  return addrFams[addrFam][1](addr) + ":{}".format(addrPort)
  return "cannot parse address family {}".format(addrFam)
 
 def parseXorAddress(attrVal):

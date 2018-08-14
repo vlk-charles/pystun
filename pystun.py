@@ -23,6 +23,10 @@ def parseXorAddress(attrVal):
 def parseStr(attrVal):
  return attrVal.decode("utf-8")
 
+def parseError(attrVal):
+ code = struct.unpack("BB", attrVal[2:4])
+ return "{}{}{:02} {}".format(code[0], "." if code[0] > 9 or code[1] > 99 else "", code[1], parseStr(attrVal[4:]))
+
 def returnRaw(attrVal):
  return " ".join("{:02x}".format(ord(c)) for c in attrVal)
 
@@ -32,7 +36,7 @@ attrTypes = {
 0x0002: ("RESPONSE-ADDRESS", parseAddress),
 0x0003: ("CHANGE-REQUEST", returnRaw),
 0x0004: ("SOURCE-ADDRESS", parseAddress),
-0x0009: ("ERROR-CODE", returnRaw),
+0x0009: ("ERROR-CODE", parseError),
 0x0005: ("CHANGED-ADDRESS", parseAddress),
 0x0020: ("XOR-MAPPED-ADDRESS", parseXorAddress),
 0x8020: ("XOR-MAPPED-ADDRESS", parseXorAddress),

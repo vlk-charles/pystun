@@ -1,51 +1,105 @@
 #!/usr/bin/env python
 
-import argparse, socket, random, struct
+import sys, argparse, socket, random, struct
 
-def parseAddress(attrVal, xor=False):
- addrFams = { # (structStr, formatFunc)
-  1: ("BBBB", lambda addr: "{}".format(".".join(str(b) for b in addr))),
-  2: (">HHHHHHHH", lambda addr: "[{}]".format(":".join("{:04x}".format(n) for n in addr)))}
- addrFam = struct.unpack("B", attrVal[1:2])[0]
- addrLen = struct.calcsize(addrFams.get(addrFam,("", None))[0])
- if addrFam in addrFams and len(attrVal) == 4 + addrLen:
-  addrPort = struct.unpack(">H", attrVal[2:4])[0]
-  addr = struct.unpack(addrFams[addrFam][0], attrVal[4:4+addrLen])
-  if xor:
-   addr = map(lambda x: x[0] ^ x[1], zip(addr, struct.unpack(addrFams[addrFam][0], transid[:addrLen])))
-   addrPort ^= struct.unpack(">H", transid[:2])[0]
-  return addrFams[addrFam][1](addr) + ":{}".format(addrPort)
- return "cannot parse address family {}".format(addrFam)
+class Transaction(object):
 
-def parseXorAddress(attrVal):
- return parseAddress(attrVal, True)
+ def __init__(self, opts=None):
+  self.opts = globals()["opts"] if opts is None else opts
+  assert type(self.opts) is argparse.Namespace
+  self.opts = argparse.Namespace(**vars(self.opts)) # make local copy
+  self.trans_id = struct.pack(">IIII",
+   0x2112A442 if self.opts.magiccookie else random.randrange(2**32),
+   random.randrange(2**32), random.randrange(2**32), random.randrange(2**32))
+  self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM if self.opts.tcp else socket.SOCK_DGRAM)
+  self.sock.bind((self.opts.address, self.opts.port))
+  if self.is_tcp():
+   self.sock.connect((self.opts.server, self.opts.serverport))
 
-def parseStr(attrVal):
- return attrVal.decode("utf-8")
+ def is_tcp(self):
+  return self.sock.type == socket.SOCK_STREAM
 
-def parseError(attrVal):
- code = struct.unpack("BB", attrVal[2:4])
- return "{}{}{:02} {}".format(code[0], "." if code[0] > 9 or code[1] > 99 else "", code[1], parseStr(attrVal[4:]))
+ def __str__(self):
+  # get peer info from self.sock for TCP
+  return "querying {}:{} from {}:{}".format(self.opts.server, self.opts.serverport, self.sock.getsockname()[0], self.sock.getsockname()[1])
 
-def returnRaw(attrVal):
- lOrd = (lambda c: c) if type(b"\0"[0]) == int else ord # no-op for Python 3
- return " ".join("{:02x}".format(lOrd(c)) for c in attrVal)
+ def send(self, msg):
+  if self.is_tcp(): return self.sock.send(msg)
+  return self.sock.sendto(msg, (self.opts.server, self.opts.serverport))
 
-# (attributeName, parseFunc)
-attrTypes = {
-0x0001: ("MAPPED-ADDRESS", parseAddress),
-0x0002: ("RESPONSE-ADDRESS", parseAddress),
-0x0003: ("CHANGE-REQUEST", returnRaw),
-0x0004: ("SOURCE-ADDRESS", parseAddress),
-0x0009: ("ERROR-CODE", parseError),
-0x0005: ("CHANGED-ADDRESS", parseAddress),
-0x0020: ("XOR-MAPPED-ADDRESS", parseXorAddress),
-0x8020: ("XOR-MAPPED-ADDRESS", parseXorAddress),
-0x8022: ("SOFTWARE", parseStr),
-0x8023: ("ALTERNATE-SERVER", parseAddress),
-0x8026: ("PADDING", returnRaw),
-0x802b: ("RESPONSE-ORIGIN", parseAddress),
-0x802c: ("OTHER-ADDRESS", parseAddress)}
+ def recvfrom(self, buffer_size=512):
+  if self.is_tcp(): return (self.sock.recv(buffer_size), (self.opts.server, self.opts.serverport))
+  return self.sock.recvfrom(buffer_size)
+
+ def close(self):
+  self.sock.close()
+
+ def make_request(self):
+  if self.opts.changerequest or self.opts.changeaddress or self.opts.changeport:
+   attrs = b"\0\x03\0\x04" + struct.pack(">I", self.opts.changeaddress << 2 | self.opts.changeport << 1)
+  else:
+   attrs = b""
+  return b"\0\x01" + struct.pack(">H", len(attrs)) + self.trans_id + attrs
+
+ def parse_addr(self, attr_val, xor=False):
+  addr_fams = { # (struct_str, format_func)
+   1: ("BBBB", lambda addr: "{}".format(".".join(str(b) for b in addr))),
+   2: (">HHHHHHHH", lambda addr: "[{}]".format(":".join("{:04x}".format(n) for n in addr)))}
+  addr_fam = struct.unpack("B", attr_val[1:2])[0]
+  addr_len = struct.calcsize(addr_fams.get(addr_fam, ("", None))[0])
+  if addr_fam in addr_fams and len(attr_val) == 4 + addr_len:
+   addr_port = struct.unpack(">H", attr_val[2:4])[0]
+   addr = struct.unpack(addr_fams[addr_fam][0], attr_val[4:4+addr_len])
+   if xor:
+    addr = map(lambda x: x[0] ^ x[1], zip(addr, struct.unpack(addr_fams[addr_fam][0], self.trans_id[:addr_len])))
+    addr_port ^= struct.unpack(">H", self.trans_id[:2])[0]
+   return addr_fams[addr_fam][1](addr) + ":{}".format(addr_port)
+  return "cannot parse address family {}".format(addr_fam)
+
+ def parse_xor_addr(self, attr_val):
+  return self.parse_addr(attr_val, True)
+
+ def parse_str(self, attr_val):
+  return attr_val.decode("utf-8")
+
+ def parse_err(self, attr_val):
+  code = struct.unpack("BB", attr_val[2:4])
+  return "{}{}{:02} {}".format(code[0], "." if code[0] > 9 or code[1] > 99 else "", code[1], self.parse_str(attr_val[4:]))
+
+ def return_raw(self, attr_val):
+  ord = (lambda c: c) if type(b"\0"[0]) == int else __builtins__.ord # no-op for Python 3
+  return " ".join("{:02x}".format(ord(c)) for c in attr_val)
+
+ def parse_msg(self, msg, out=sys.stdout):
+  out.write(" length: {}\n".format(len(msg)))
+  out.write(" length of attributes: {}\n".format(struct.unpack(">H", msg[2:4])[0]))
+  if not msg[4:20] == self.trans_id:
+   out.write(" Transaction ID differs!\n")
+
+  i=20
+  while i <len(msg):
+   attr_type, attr_val_len = struct.unpack(">HH", msg[i:i+4])
+   i += 4
+   attr_type_dec = ATTR_TYPES.get(attr_type, ("unknown", Transaction.return_raw))
+   out.write(" attribute type {:x} {}, value length: {}\n".format(attr_type, attr_type_dec[0], attr_val_len))
+   out.write("  {}\n".format((Transaction.return_raw if self.opts.raw else attr_type_dec[1])(self, msg[i:i+attr_val_len])))
+   i += attr_val_len
+
+# (attr_name, parse_func)
+ATTR_TYPES = {
+0x0001: ("MAPPED-ADDRESS", Transaction.parse_addr),
+0x0002: ("RESPONSE-ADDRESS", Transaction.parse_addr),
+0x0003: ("CHANGE-REQUEST", Transaction.return_raw),
+0x0004: ("SOURCE-ADDRESS", Transaction.parse_addr),
+0x0009: ("ERROR-CODE", Transaction.parse_err),
+0x0005: ("CHANGED-ADDRESS", Transaction.parse_addr),
+0x0020: ("XOR-MAPPED-ADDRESS", Transaction.parse_xor_addr),
+0x8020: ("XOR-MAPPED-ADDRESS", Transaction.parse_xor_addr),
+0x8022: ("SOFTWARE", Transaction.parse_str),
+0x8023: ("ALTERNATE-SERVER", Transaction.parse_addr),
+0x8026: ("PADDING", Transaction.return_raw),
+0x802b: ("RESPONSE-ORIGIN", Transaction.parse_addr),
+0x802c: ("OTHER-ADDRESS", Transaction.parse_addr)}
 
 argparser = argparse.ArgumentParser(description="Query a STUN server.", epilog="This software loosely follows the RFC 3489 and 5389 standards.")
 argparser.add_argument("-t", "--tcp", action="store_true", help="use TCP instead of UDP")
@@ -60,38 +114,14 @@ argparser.add_argument("server", default="stun.stunprotocol.org", nargs="?", hel
 argparser.add_argument("serverport", type=int, default=3478, nargs="?", help="the server's port to send the request to (default: %(default)s)")
 
 opts = argparser.parse_args()
-transid = struct.pack(">IIII", 0x2112A442 if opts.magiccookie else random.randrange(2**32), random.randrange(2**32), random.randrange(2**32), random.randrange(2**32))
-if opts.changerequest or opts.changeaddress or opts.changeport:
- attrs = b"\0\x03\0\x04" + struct.pack(">I", opts.changeaddress << 2 | opts.changeport << 1)
-else:
- attrs = b""
-message = b"\0\x01" + struct.pack(">H", len(attrs)) + transid + attrs
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM if opts.tcp else socket.SOCK_DGRAM)
-sock.bind((opts.address, opts.port))
-print("querying {}:{} from {}:{}".format(opts.server, opts.serverport, sock.getsockname()[0], sock.getsockname()[1]))
-if opts.tcp:
- sock.connect((opts.server, opts.serverport))
- sock.send(message)
- reply = sock.recv(512)
- sock.close()
- print("reply")
-else:
- sock.sendto(message, (opts.server, opts.serverport))
- reply = sock.recvfrom(512)
+if __name__ == "__main__":
+ transaction = Transaction()
+ request = transaction.make_request()
+ print(transaction)
+ transaction.parse_msg(request)
+ transaction.send(request)
+ reply = transaction.recvfrom()
+ if transaction.is_tcp(): transaction.close()
  print("reply from {}:{}".format(reply[1][0], reply[1][1]))
- reply = reply[0]
-
-print(" length: {}".format(len(reply)))
-print(" length of attributes: {}".format(struct.unpack(">H", reply[2:4])[0]))
-if not reply[4:20] == transid:
- print(" Transaction ID differs!")
-
-i=20
-while i <len(reply):
- attrType, attrValLen = struct.unpack(">HH", reply[i:i+4])
- i += 4
- attrTypeDec = attrTypes.get(attrType, ("unknown", returnRaw))
- print(" attribute type {:x} {}, value length: {}".format(attrType, attrTypeDec[0], attrValLen))
- print("  " + (returnRaw if opts.raw else attrTypeDec[1])(reply[i:i+attrValLen]))
- i += attrValLen
+ transaction.parse_msg(reply[0])

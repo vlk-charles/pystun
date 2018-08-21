@@ -5,9 +5,9 @@ import sys, argparse, socket, random, struct
 class Transaction(object):
 
  def __init__(self, opts=None):
-  self.opts = globals()["opts"] if opts is None else opts
-  assert type(self.opts) is argparse.Namespace
-  self.opts = argparse.Namespace(**vars(self.opts)) # make local copy
+  if opts is None: opts = globals()["opts"]
+  assert type(opts) is argparse.Namespace
+  self.opts = argparse.Namespace(**vars(opts)) # make local copy
   self.trans_id = struct.pack(">IIII",
    0x2112A442 if self.opts.magiccookie else random.randrange(2**32),
    random.randrange(2**32), random.randrange(2**32), random.randrange(2**32))

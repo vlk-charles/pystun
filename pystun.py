@@ -20,15 +20,16 @@ class Transaction(object):
   return self.sock.type == socket.SOCK_STREAM
 
  def __str__(self):
-  # get peer info from self.sock for TCP
-  return "querying {}:{} from {}:{}".format(self.opts.server, self.opts.serverport, self.sock.getsockname()[0], self.sock.getsockname()[1])
+  server, serverport = self.sock.getpeername() if self.is_tcp() else (self.opts.server, self.opts.serverport)
+  return "querying {}:{} from {}:{} over {}".format(
+   server, serverport, self.sock.getsockname()[0], self.sock.getsockname()[1], "TCP" if self.is_tcp() else "UDP")
 
  def send(self, msg):
   if self.is_tcp(): return self.sock.send(msg)
   return self.sock.sendto(msg, (self.opts.server, self.opts.serverport))
 
  def recvfrom(self, buffer_size=512):
-  if self.is_tcp(): return (self.sock.recv(buffer_size), (self.opts.server, self.opts.serverport))
+  if self.is_tcp(): return (self.sock.recv(buffer_size), self.sock.getpeername())
   return self.sock.recvfrom(buffer_size)
 
  def close(self):
